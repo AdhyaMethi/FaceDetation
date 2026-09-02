@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FacePulse - Facial Reaction & Expression Tracker</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Application Styles -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <!-- MediaPipe FaceMesh & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    
+    <!-- Chart.js & Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+        <div class="brand">
+            <div class="brand-logo">😊</div>
+            <div class="brand-info">
+                <span class="brand-title">FacePulse AI</span>
+                <span class="brand-subtitle">Flask Facial Reaction & Expression Detector</span>
+            </div>
+        </div>
+
+        <!-- Mode Switcher Tabs -->
+        <div class="mode-tabs">
+            <button id="tabFreeTrack" class="tab-btn active" onclick="switchAppMode('FREE')">
+                <span>👁️</span> Free Tracking
+            </button>
+            <button id="tabChallengeGame" class="tab-btn" onclick="switchAppMode('GAME')">
+                <span>🎮</span> Student Challenge Game
+            </button>
+            <button id="tabUploadImage" class="tab-btn" onclick="switchAppMode('UPLOAD')">
+                <span>🖼️</span> Upload Photo
+            </button>
+        </div>
+
+        <div class="nav-actions">
+            <button id="toggleCamBtn" class="btn btn-primary">
+                <span class="btn-icon">📹</span>
+                <span id="camBtnText">Start Camera</span>
+            </button>
+            <button id="captureSnapBtn" class="btn btn-secondary" disabled>
+                <span class="btn-icon">📸</span> Snapshot
+            </button>
+            <button id="resetSessionBtn" class="btn btn-danger">
+                <span class="btn-icon">🔄</span> Reset Stats
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Application Grid -->
+    <div class="app-layout">
+        <!-- Main Video & Stage Section -->
+        <main class="stage-container">
+            <!-- Stage Header Toolbar -->
+            <div class="stage-header">
+                <div class="status-indicator">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="statusText">Camera Inactive</span>
+                </div>
+                <div class="mesh-controls">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="showMeshToggle" checked>
+                        <span class="slider"></span>
+                        <span class="toggle-label">Face Mesh</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="showContoursToggle" checked>
+                        <span class="slider"></span>
+                        <span class="toggle-label">Facial Contours</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Video Viewport Stage -->
+            <div class="video-viewport" id="viewportContainer">
+                <video id="inputVideo" playsinline muted></video>
+                <canvas id="outputCanvas"></canvas>
+                
+                <!-- Floating Reaction HUD Card (Free Tracking) -->
+                <div class="hud-overlay" id="hudOverlay">
+                    <div class="hud-emoji" id="hudEmoji">😐</div>
+                    <div class="hud-details">
+                        <span class="hud-title">Detected Expression</span>
+                        <div class="hud-expression-row">
+                            <span class="hud-expression" id="hudExpression">Neutral</span>
+                            <span class="hud-confidence" id="hudConfidence">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Student Minigame Challenge Banner Overlay -->
+                <div class="game-overlay" id="gameOverlay" style="display: none;">
+                    <div class="game-banner">
+                        <div class="game-prompt-box">
+                            <span class="game-round-badge" id="gameRoundBadge">Round 1 / 5</span>
+                            <h2 class="game-prompt-text" id="gamePromptText">Show your biggest Smile! 😊</h2>
+                        </div>
+                        
+                        <div class="game-stats-box">
+                            <!-- Countdown Circular Ring -->
+                            <div class="timer-ring">
+                                <span id="gameTimerText">5.0</span>
+                            </div>
+                            <div class="game-score-info">
+                                <span class="game-score-val" id="gameScoreVal">Score: 0</span>
+                                <span class="game-streak-val" id="gameStreakVal">Streak: 0 🔥</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Match Feedback Toast Notification -->
+                    <div class="game-toast" id="gameToast" style="display: none;">
+                        <span id="toastText">GREAT MATCH! +250 PTS</span>
+                    </div>
+
+                    <!-- Start Challenge Button inside stage if game not running -->
+                    <div class="game-start-container" id="gameStartContainer">
+                        <h3>🎯 Expression Match Challenge</h3>
+                        <p>Match target facial reactions before the timer runs out! Build combo streaks and earn high scores.</p>
+                        <button id="startGameBtn" class="btn btn-primary btn-lg">
+                            <span>🚀</span> Start Game Round
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Camera Off Placeholder -->
+                <div class="camera-placeholder" id="cameraPlaceholder">
+                    <div class="placeholder-content">
+                        <div class="placeholder-icon">📸</div>
+                        <h3>Camera is Off</h3>
+                        <p>Click <strong>Start Camera</strong> above to enable real-time facial reaction detection.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Image Viewport & Dropzone Stage -->
+            <div class="upload-container" id="uploadContainer" style="display: none;">
+                <!-- Drag & Drop Dropzone Box (shown when waiting for upload) -->
+                <div class="upload-dropzone" id="uploadDropzone">
+                    <input type="file" id="imageFileInput" accept="image/*" style="display: none;">
+                    <div class="dropzone-icon">📤</div>
+                    <h3>Upload Photo for Emotion Analysis</h3>
+                    <p>Drag & drop your image photo here, or click to select from your device</p>
+                    <button class="btn btn-primary btn-lg" id="triggerUploadBtn">
+                        <span class="btn-icon">📁</span> Select Photo File
+                    </button>
+                    
+                    <div class="preset-divider">
+                        <span>OR TEST SAMPLE FACE PHOTOS</span>
+                    </div>
+                    <div class="sample-presets">
+                        <button class="preset-btn" data-preset="smiling">😊 Smiling</button>
+                        <button class="preset-btn" data-preset="laughing">😆 Laughing</button>
+                        <button class="preset-btn" data-preset="surprised">😲 Surprised</button>
+                        <button class="preset-btn" data-preset="sad">😢 Sad</button>
+                        <button class="preset-btn" data-preset="neutral">😐 Neutral</button>
+                    </div>
+                </div>
+
+                <!-- Uploaded Image Display & Emotion Analysis HUD Stage -->
+                <div class="upload-stage-view" id="uploadStageView" style="display: none;">
+                    <div class="upload-canvas-wrapper">
+                        <img id="uploadedImagePreview" style="display: none;" crossorigin="anonymous">
+                        <canvas id="uploadCanvas"></canvas>
+
+                        <!-- Floating Upload Reaction HUD Card -->
+                        <div class="hud-overlay" id="uploadHudOverlay">
+                            <div class="hud-emoji" id="uploadHudEmoji">😐</div>
+                            <div class="hud-details">
+                                <span class="hud-title">Photo Detected Emotion</span>
+                                <div class="hud-expression-row">
+                                    <span class="hud-expression" id="uploadHudExpression">Neutral</span>
+                                    <span class="hud-confidence" id="uploadHudConfidence">0%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Loading Spinner Overlay -->
+                        <div class="upload-loading-overlay" id="uploadLoadingOverlay" style="display: none;">
+                            <div class="spinner"></div>
+                            <span>Analyzing Facial Landmarks & Emotion...</span>
+                        </div>
+                    </div>
+
+                    <!-- Emotion Probability Spectrum Breakdown Panel -->
+                    <div class="emotion-spectrum-card" id="emotionSpectrumCard">
+                        <div class="spectrum-header">
+                            <h4>📊 Emotion Breakdown Spectrum</h4>
+                            <button id="reuploadBtn" class="btn btn-secondary btn-sm">
+                                <span>🖼️</span> Upload New Photo
+                            </button>
+                        </div>
+                        <div class="spectrum-bars">
+                            <div class="spectrum-item">
+                                <div class="spectrum-info">
+                                    <span>😊 Smiling</span>
+                                    <span id="specValSmiling">0.0%</span>
+                                </div>
+                                <div class="spectrum-bar-bg">
+                                    <div class="spectrum-bar-fill spec-smile" id="specBarSmiling" style="width: 0%;"></div>
+                                </div>
+                            </div>
+
+                            <div class="spectrum-item">
+                                <div class="spectrum-info">
+                                    <span>😆 Laughing</span>
+                                    <span id="specValLaughing">0.0%</span>
+                                </div>
+                                <div class="spectrum-bar-bg">
+                                    <div class="spectrum-bar-fill spec-laugh" id="specBarLaughing" style="width: 0%;"></div>
+                                </div>
+                            </div>
+
+                            <div class="spectrum-item">
+                                <div class="spectrum-info">
+                                    <span>😢 Sad</span>
+                                    <span id="specValSad">0.0%</span>
+                                </div>
+                                <div class="spectrum-bar-bg">
+                                    <div class="spectrum-bar-fill spec-sad" id="specBarSad" style="width: 0%;"></div>
+                                </div>
+                            </div>
+
+                            <div class="spectrum-item">
+                                <div class="spectrum-info">
+                                    <span>😲 Surprised</span>
+                                    <span id="specValSurprised">0.0%</span>
+                                </div>
+                                <div class="spectrum-bar-bg">
+                                    <div class="spectrum-bar-fill spec-surprised" id="specBarSurprised" style="width: 0%;"></div>
+                                </div>
+                            </div>
+
+                            <div class="spectrum-item">
+                                <div class="spectrum-info">
+                                    <span>😐 Neutral</span>
+                                    <span id="specValNeutral">0.0%</span>
+                                </div>
+                                <div class="spectrum-bar-bg">
+                                    <div class="spectrum-bar-fill spec-neutral" id="specBarNeutral" style="width: 0%;"></div>
+                                </div>
+                            </div>
+
+                            <div class="spectrum-item">
+                                <div class="spectrum-info">
+                                    <span>😡 Angry</span>
+                                    <span id="specValAngry">0.0%</span>
+                                </div>
+                                <div class="spectrum-bar-bg">
+                                    <div class="spectrum-bar-fill spec-angry" id="specBarAngry" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Reaction Counters Bar -->
+            <div class="reaction-counters">
+                <div class="counter-card card-smile" id="cardSmiling">
+                    <span class="counter-emoji">😊</span>
+                    <div class="counter-info">
+                        <span class="counter-value" id="countSmiling">0</span>
+                        <span class="counter-label">Smiling</span>
+                    </div>
+                </div>
+                <div class="counter-card card-laugh" id="cardLaughing">
+                    <span class="counter-emoji">😆</span>
+                    <div class="counter-info">
+                        <span class="counter-value" id="countLaughing">0</span>
+                        <span class="counter-label">Laughing</span>
+                    </div>
+                </div>
+                <div class="counter-card card-sad" id="cardSad">
+                    <span class="counter-emoji">😢</span>
+                    <div class="counter-info">
+                        <span class="counter-value" id="countSad">0</span>
+                        <span class="counter-label">Sad</span>
+                    </div>
+                </div>
+                <div class="counter-card card-surprised" id="cardSurprised">
+                    <span class="counter-emoji">😲</span>
+                    <div class="counter-info">
+                        <span class="counter-value" id="countSurprised">0</span>
+                        <span class="counter-label">Surprised</span>
+                    </div>
+                </div>
+                <div class="counter-card card-neutral" id="cardNeutral">
+                    <span class="counter-emoji">😐</span>
+                    <div class="counter-info">
+                        <span class="counter-value" id="countNeutral">0</span>
+                        <span class="counter-label">Neutral</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Analytics & Leaderboard Sidebar -->
+        <aside class="analytics-sidebar">
+            <!-- Student Leaderboard & Achievements Section -->
+            <div class="leaderboard-card">
+                <div class="sidebar-title">
+                    <span>🏆</span> Student Leaderboard
+                </div>
+                <div class="leaderboard-list" id="leaderboardList">
+                    <div class="lb-item">
+                        <span class="lb-rank">1</span>
+                        <span class="lb-name">Alex (Student)</span>
+                        <span class="lb-score">1250 pts</span>
+                    </div>
+                    <div class="lb-item">
+                        <span class="lb-rank">2</span>
+                        <span class="lb-name">Sam (Student)</span>
+                        <span class="lb-score">980 pts</span>
+                    </div>
+                    <div class="lb-item">
+                        <span class="lb-rank">3</span>
+                        <span class="lb-name">Jordan (Student)</span>
+                        <span class="lb-score">750 pts</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Student Badges -->
+            <div class="badges-card">
+                <div class="sidebar-title">
+                    <span>🎖️</span> Class Badges
+                </div>
+                <div class="badges-grid">
+                    <div class="badge-item unlocked" title="Reached 1000+ Score in Challenge">
+                        <span class="badge-icon">👑</span>
+                        <span class="badge-name">Master Smiler</span>
+                    </div>
+                    <div class="badge-item unlocked" title="Achieved 5+ Combo Streak">
+                        <span class="badge-icon">🔥</span>
+                        <span class="badge-name">Streak King</span>
+                    </div>
+                    <div class="badge-item locked" id="badgeSpeed" title="Score 1500+ points">
+                        <span class="badge-icon">⚡</span>
+                        <span class="badge-name">Speed Demon</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metric Gauges -->
+            <div class="gauge-section">
+                <div class="gauge-card">
+                    <div class="gauge-header">
+                        <span>Smile Intensity</span>
+                        <span class="gauge-val" id="smileVal">0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill fill-smile" id="smileBar" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="gauge-card">
+                    <div class="gauge-header">
+                        <span>Mouth Openness (MAR)</span>
+                        <span class="gauge-val" id="marVal">0.00</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill fill-mar" id="marBar" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <div class="gauge-card">
+                    <div class="gauge-header">
+                        <span>Positivity Rate</span>
+                        <span class="gauge-val" id="positivityVal">0.0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill fill-positivity" id="positivityBar" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-Time Chart -->
+            <div class="chart-card">
+                <div class="chart-header">
+                    <span>Smile & Expression Timeline</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="timelineChart"></canvas>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Expression Activity Log Table -->
+    <section class="log-section">
+        <div class="log-header">
+            <h3><span>📜</span> Facial Reaction Activity Log</h3>
+            <span class="log-note">Real-time expression events recorded by Flask API</span>
+        </div>
+        <div class="table-container">
+            <table class="log-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Expression</th>
+                        <th>Confidence</th>
+                        <th>Smile Score</th>
+                        <th>MAR (Mouth)</th>
+                        <th>EAR (Eye)</th>
+                        <th>Snapshot</th>
+                    </tr>
+                </thead>
+                <tbody id="logTableBody">
+                    <tr class="empty-row">
+                        <td colspan="7">No reaction events logged yet. Start the camera to begin tracking!</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Game Over High Score Modal -->
+    <div class="modal-overlay" id="gameOverModal" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>🎉 Game Round Completed!</h2>
+            </div>
+            <div class="modal-body">
+                <div class="final-score-box">
+                    <span class="score-label">Your Final Score</span>
+                    <span class="score-number" id="modalFinalScore">1250</span>
+                    <span class="streak-label" id="modalMaxStreak">Max Streak: 5 🔥</span>
+                </div>
+                
+                <div class="form-group">
+                    <label for="studentNameInput">Enter Your Name for the Leaderboard:</label>
+                    <input type="text" id="studentNameInput" class="input-text" placeholder="e.g. Alex (Student)" value="Student Star">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="submitScoreBtn" class="btn btn-primary">
+                    <span>🏆</span> Submit to Leaderboard
+                </button>
+                <button id="playAgainBtn" class="btn btn-secondary">
+                    <span>🔄</span> Play Again
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global Mode Switcher Fallback Handler -->
+    <script>
+        function switchAppMode(targetMode) {
+            var freeBtn = document.getElementById('tabFreeTrack');
+            var gameBtn = document.getElementById('tabChallengeGame');
+            var uploadBtn = document.getElementById('tabUploadImage');
+            
+            var viewportContainer = document.getElementById('viewportContainer');
+            var uploadContainer = document.getElementById('uploadContainer');
+            
+            var hud = document.getElementById('hudOverlay');
+            var game = document.getElementById('gameOverlay');
+
+            [freeBtn, gameBtn, uploadBtn].forEach(function(b) { if (b) b.classList.remove('active'); });
+
+            if (targetMode === 'FREE') {
+                if (freeBtn) freeBtn.classList.add('active');
+                if (viewportContainer) viewportContainer.style.display = 'block';
+                if (uploadContainer) uploadContainer.style.display = 'none';
+                if (hud) hud.style.display = 'flex';
+                if (game) game.style.display = 'none';
+                if (window.challengeEngine) window.challengeEngine.stopGame();
+                window.currentAppMode = 'FREE';
+            } else if (targetMode === 'GAME') {
+                if (gameBtn) gameBtn.classList.add('active');
+                if (viewportContainer) viewportContainer.style.display = 'block';
+                if (uploadContainer) uploadContainer.style.display = 'none';
+                if (hud) hud.style.display = 'none';
+                if (game) game.style.display = 'flex';
+                window.currentAppMode = 'GAME';
+            } else if (targetMode === 'UPLOAD') {
+                if (uploadBtn) uploadBtn.classList.add('active');
+                if (viewportContainer) viewportContainer.style.display = 'none';
+                if (uploadContainer) uploadContainer.style.display = 'flex';
+                if (window.challengeEngine) window.challengeEngine.stopGame();
+                if (window.faceEngine && window.faceEngine.isRunning) {
+                    var toggleCamBtn = document.getElementById('toggleCamBtn');
+                    if (toggleCamBtn) toggleCamBtn.click();
+                }
+                window.currentAppMode = 'UPLOAD';
+            }
+        }
+    </script>
+
+    <!-- App Scripts -->
+    <script src="{{ url_for('static', filename='js/face_engine.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/challenge_engine.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
